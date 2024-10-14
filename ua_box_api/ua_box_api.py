@@ -1,5 +1,4 @@
-from io import BytesIO
-import boxsdk
+from box_sdk_gen import BoxClient, BoxJWTAuth, JWTConfig
 
 __author__ = "Stephen Stern"
 __maintainer__ = "Stephen Stern"
@@ -9,69 +8,84 @@ __email__ = "sterns1@email.arizona.edu"
 class BoxApi:
     def __init__(self, stache_secret):
         # Authenticate the API client using the JWT authentication method.
-        private_key_stream = BytesIO(
-            stache_secret["boxAppSettings"]["appAuth"]["privateKey"].encode())
-        jwt_options = {
-            "client_id": stache_secret["boxAppSettings"]["clientID"],
-            "client_secret": stache_secret["boxAppSettings"]["clientSecret"],
-            "enterprise_id": stache_secret["enterpriseID"],
-            "jwt_key_id": stache_secret[
-                "boxAppSettings"]["appAuth"]["publicKeyID"],
-            "rsa_private_key_passphrase": stache_secret[
-                "boxAppSettings"]["appAuth"]["passphrase"].encode(),
-            "rsa_private_key_data": private_key_stream
-        }
-        auth = boxsdk.JWTAuth(**jwt_options)
-        auth.authenticate_instance()
-        self.client = boxsdk.Client(auth)
+        jwt_config = JWTConfig(
+            client_id=stache_secret["boxAppSettings"]["clientID"],
+            client_secret=stache_secret["boxAppSettings"]["clientSecret"],
+            enterprise_id=stache_secret["enterpriseID"],
+            jwt_key_id=stache_secret["boxAppSettings"]["appAuth"]["publicKeyID"],
+            private_key=stache_secret["boxAppSettings"]["appAuth"]["privateKey"],
+            private_key_passphrase=stache_secret["boxAppSettings"]["appAuth"][
+                "passphrase"
+            ],
+        )
+        auth = BoxJWTAuth(config=jwt_config)
+        self.client = BoxClient(auth=auth)
 
-    def get_all_items(self, item_id):
+    def get_all_items(self, item_id: int | str):
         """Returns list of all items in the object with the given item_id."""
         # If a folder is passed in, it gets caught in an infinite while loop
         # with a bare except somewhere -- instead, check that the id is an int.
         if not (isinstance(item_id, int) or isinstance(item_id, str)):
             raise TypeError("Item_id must be an int.")
-        folder = self.client.folder(folder_id=item_id)
 
-        items = list()
-        offset = 0
-        has_next_item = True
+        item_id = str(item_id)
 
-        # Every 300000 items, get a new generator; otherwise, add the current
-        # generator's next(). If the current generator doesn't have a next(),
-        # make while condition False.
-        while has_next_item:
-            if len(items) == offset:
-                items_generator = folder.get_items(
-                    limit=offset + 300000, offset=offset)
-                offset += 300000
-            try:
-                items.append(items_generator.next())
-            except StopIteration:
-                has_next_item = False
+        folder = self.client.folders.get_folder_items(folder_id=item_id, usemarker=True)
+        items = folder.entries
+        next_item = folder.next_marker
+        while next_item is not None:
+            folder = self.client.folders.get_folder_items(
+                folder_id=item_id, usemarker=True, marker=next_item
+            )
+            if folder.entries is not None:
+                items += folder.entries
+                next_item = folder.next_marker
+            else:
+                break
 
-        return items
+        if items is None:
+            raise FileNotFoundError("Failed to find requested folder.")
+        else:
+            return items
 
-    def find_child_by_name(self, name, item_id):
+    def find_child_by_name(self, name: str, item_id: int | str):
         """Returns object with name if found in item_id, or None if not."""
-        matches = [x for x in self.get_all_items(item_id) if x.name == name]
-        if matches:
-            return matches[0]
-        return None
+        search = self.client.search.search_for_content(
+            query=f'"{name}"',  # Wrap query in double quotes, because Box API.
+            ancestor_folder_ids=[str(item_id)],
+            content_types=["name"],
+        )
 
-    def get_duplicate_file_name(self, folder_id, current_name, zip_file=False):
+        # This construct throws a ValueError if there isn't exactly 1 match.
+        # https://stackoverflow.com/a/7008062
+        # https://dbader.org/blog/python-nested-unpacking
+        [result] = [item for item in search.entries if item.name == name]
+        return result
+
+        # This block would be reasonable for the first of one or more matches.
+        # Could also do all results? Then we could use get_duplicate_file_name.
+        # But now we'd be returning a list instead of a
+        # FileFull | FolderFull | WebLink | SearchResultWithSharedLink
+
+        # result = next((item for item in search.entries if item.name == name), None)
+        # if result:
+        #     return result
+        # else:
+        #     raise FileNotFoundError("Failed to find requested item.")
+
+    def get_duplicate_file_name(
+        self, folder_id: int | str, name: str, zip_file: bool = False
+    ):
         """If the given name is in the folder, return a modified file name."""
-        search_name = current_name
         if zip_file:
-            search_name = current_name.replace(".zip", "")
+            name = name.replace(".zip", "")
         folder_items = self.get_all_items(folder_id)
-        duplicates = [
-            item.name for item in folder_items if search_name in item.name]
+        duplicates = [item.name for item in folder_items if name in item.name]
 
         if duplicates:
             if zip_file:
-                return f"{search_name}({len(duplicates)}).zip"
+                return f"{name}({len(duplicates)}).zip"
 
-            return f"{current_name}({len(duplicates)})"
+            return f"{name}({len(duplicates)})"
 
-        return current_name
+        return name
