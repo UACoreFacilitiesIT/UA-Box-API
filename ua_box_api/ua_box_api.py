@@ -49,32 +49,23 @@ class BoxApi:
         else:
             return items
 
-        """Returns object with name if found in item_id, or None if not."""
     def find_child_by_name(
         self, name: str, item_id: str
     ) -> FileFull | FolderFull | WebLink:
+        """Returns object with name if found in item_id. Raises a ValueError if there
+        isn't exactly one result."""
         search = self.client.search.search_for_content(
-            query=f'"{name}"',  # Wrap query in double quotes, because Box API.
+            # Wrap query in double quotes, because Box API.
+            query=f'"{name}"',
             ancestor_folder_ids=[str(item_id)],
             content_types=["name"],
         )
 
-        # This construct throws a ValueError if there isn't exactly 1 match.
-        # https://stackoverflow.com/a/7008062
-        # https://dbader.org/blog/python-nested-unpacking
+        # The assignment here uses unpacking/destructuring.
+        # This construct throws a ValueError if the list comprehension doesn't contain
+        # one and only one item.
         [result] = [item for item in search.entries if item.name == name]
         return result
-
-        # This block would be reasonable for the first of one or more matches.
-        # Could also do all results? Then we could use get_duplicate_file_name.
-        # But now we'd be returning a list instead of a
-        # FileFull | FolderFull | WebLink | SearchResultWithSharedLink
-
-        # result = next((item for item in search.entries if item.name == name), None)
-        # if result:
-        #     return result
-        # else:
-        #     raise FileNotFoundError("Failed to find requested item.")
 
     def get_duplicate_file_name(
         self, folder_id: str, name: str, zip_file: bool = False
