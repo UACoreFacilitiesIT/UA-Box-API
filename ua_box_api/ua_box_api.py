@@ -1,4 +1,12 @@
-from box_sdk_gen import BoxClient, BoxJWTAuth, JWTConfig
+from box_sdk_gen import (
+    BoxClient,
+    BoxJWTAuth,
+    FileFull,
+    FolderFull,
+    FolderMini,
+    JWTConfig,
+    WebLink,
+)
 
 __author__ = "Stephen Stern"
 __maintainer__ = "Stephen Stern"
@@ -21,15 +29,8 @@ class BoxApi:
         auth = BoxJWTAuth(config=jwt_config)
         self.client = BoxClient(auth=auth)
 
-    def get_all_items(self, item_id: int | str):
+    def get_all_items(self, item_id: str) -> list[FileFull | FolderMini | WebLink]:
         """Returns list of all items in the object with the given item_id."""
-        # If a folder is passed in, it gets caught in an infinite while loop
-        # with a bare except somewhere -- instead, check that the id is an int.
-        if not (isinstance(item_id, int) or isinstance(item_id, str)):
-            raise TypeError("Item_id must be an int.")
-
-        item_id = str(item_id)
-
         folder = self.client.folders.get_folder_items(folder_id=item_id, usemarker=True)
         items = folder.entries
         next_item = folder.next_marker
@@ -48,8 +49,10 @@ class BoxApi:
         else:
             return items
 
-    def find_child_by_name(self, name: str, item_id: int | str):
         """Returns object with name if found in item_id, or None if not."""
+    def find_child_by_name(
+        self, name: str, item_id: str
+    ) -> FileFull | FolderFull | WebLink:
         search = self.client.search.search_for_content(
             query=f'"{name}"',  # Wrap query in double quotes, because Box API.
             ancestor_folder_ids=[str(item_id)],
@@ -74,8 +77,8 @@ class BoxApi:
         #     raise FileNotFoundError("Failed to find requested item.")
 
     def get_duplicate_file_name(
-        self, folder_id: int | str, name: str, zip_file: bool = False
-    ):
+        self, folder_id: str, name: str, zip_file: bool = False
+    ) -> str:
         """If the given name is in the folder, return a modified file name."""
         if zip_file:
             name = name.replace(".zip", "")
