@@ -59,6 +59,9 @@ class BoxApi:
             query=f'"{name}"',
             ancestor_folder_ids=[str(item_id)],
             content_types=["name"],
+            # This is currently the default behavior, but I don't want to worry about
+            # dealing with a SearchResultWithSharedLink.
+            include_recent_shared_links=False,
         )
 
         # The assignment here uses unpacking/destructuring.
